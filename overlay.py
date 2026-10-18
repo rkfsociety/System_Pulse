@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 import time
 import warnings
+import winreg
 from ctypes import wintypes
 import psutil
 import pynvml
@@ -31,6 +32,8 @@ WS_EX_TRANSPARENT = 0x00000020
 ERROR_ALREADY_EXISTS = 183
 GA_ROOT = 2
 POSITION_MERGE_TOLERANCE = 4
+AUTOSTART_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+AUTOSTART_VALUE = "SystemPulse"
 
 user32 = ctypes.windll.user32
 user32.GetForegroundWindow.restype = wintypes.HWND
@@ -224,6 +227,11 @@ class Overlay(QWidget):
         self.move_action.setCheckable(True)
         self.move_action.toggled.connect(self.set_move_enabled)
         tray_menu.addAction(self.move_action)
+        self.autostart_action = QAction("Автозапуск при входе в Windows", self)
+        self.autostart_action.setCheckable(True)
+        self.autostart_action.setChecked(self.is_autostart_enabled())
+        self.autostart_action.toggled.connect(self.set_autostart_enabled)
+        tray_menu.addAction(self.autostart_action)
         tray_menu.addSeparator()
         quit_action = QAction("Выход", self)
         quit_action.triggered.connect(QApplication.instance().quit)
@@ -270,6 +278,42 @@ class Overlay(QWidget):
         except Exception:
             logging.exception("Не удалось загрузить настройки")
         return {}
+
+    @staticmethod
+    def is_autostart_enabled():
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_KEY, 0, winreg.KEY_READ) as key:
+                winreg.QueryValueEx(key, AUTOSTART_VALUE)
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError:
+            logging.exception("Не удалось проверить настройку автозапуска")
+            return False
+
+    def set_autostart_enabled(self, enabled):
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, AUTOSTART_KEY) as key:
+                if enabled:
+                    script_path = Path(__file__).resolve().with_name("start_overlay.vbs")
+                    wscript_path = Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "wscript.exe"
+                    command = f'"{wscript_path}" "{script_path}"'
+                    winreg.SetValueEx(key, AUTOSTART_VALUE, 0, winreg.REG_SZ, command)
+                else:
+                    try:
+                        winreg.DeleteValue(key, AUTOSTART_VALUE)
+                    except FileNotFoundError:
+                        pass
+        except OSError:
+            logging.exception("Не удалось изменить автозапуск")
+            self.autostart_action.blockSignals(True)
+            self.autostart_action.setChecked(self.is_autostart_enabled())
+            self.autostart_action.blockSignals(False)
+            self.tray_icon.showMessage(
+                "System Pulse",
+                "Не удалось изменить настройку автозапуска.",
+                QSystemTrayIcon.MessageIcon.Warning,
+            )
 
     def save_position(self):
         try:
