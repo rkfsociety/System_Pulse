@@ -149,7 +149,7 @@ class Overlay(QWidget):
             val.setFont(font_val)
             val.setStyleSheet("color: #43e5ee;")
             val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            val.setFixedWidth(72)
+            val.setFixedWidth(104 if index == 6 else 72)
             value_glow = QGraphicsDropShadowEffect(val)
             value_glow.setBlurRadius(6)
             value_glow.setColor(QColor(36, 218, 247, 120))
@@ -515,9 +515,10 @@ class Overlay(QWidget):
         self._set_meter(5, min(100, max(2 if sent_speed else 0, round(sent_speed / (384 * 1024) * 100))))
 
         uptime = max(0, int(time.time() - psutil.boot_time()))
-        hours, remainder = divmod(uptime, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        self.rows[6].setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+        days, remainder = divmod(uptime, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes = remainder // 60
+        self.rows[6].setText(f"{days}д {hours:02d}ч {minutes:02d}м")
 
     @staticmethod
     def _load_color(value):
