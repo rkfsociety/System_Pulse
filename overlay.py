@@ -121,7 +121,7 @@ class Overlay(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowOpacity(1.0)
-        self.setFixedWidth(288)
+        self.setFixedWidth(230)
 
         try:
             pynvml.nvmlInit()
@@ -131,11 +131,11 @@ class Overlay(QWidget):
             self._gpu_ok = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(26, 24, 26, 24)
+        layout.setContentsMargins(19, 20, 19, 20)
         layout.setSpacing(0)
 
-        font_val = QFont("Segoe UI", 12, QFont.Weight.DemiBold)
-        font_label = QFont("Segoe UI", 11, QFont.Weight.Medium)
+        font_val = QFont("Segoe UI", 10, QFont.Weight.DemiBold)
+        font_label = QFont("Segoe UI", 9, QFont.Weight.Medium)
 
         self.rows = []
         self.meters = []
@@ -143,15 +143,15 @@ class Overlay(QWidget):
             lbl = QLabel(name)
             lbl.setFont(font_label)
             lbl.setStyleSheet("color: #e3f0fc;")
-            lbl.setFixedWidth(56)
+            lbl.setFixedWidth(46)
 
             val = QLabel("—")
             val.setFont(font_val)
             val.setStyleSheet("color: #43e5ee;")
             val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            val.setFixedWidth(84)
+            val.setFixedWidth(72)
             value_glow = QGraphicsDropShadowEffect(val)
-            value_glow.setBlurRadius(8)
+            value_glow.setBlurRadius(6)
             value_glow.setColor(QColor(36, 218, 247, 120))
             value_glow.setOffset(0, 0)
             val.setGraphicsEffect(value_glow)
@@ -159,21 +159,21 @@ class Overlay(QWidget):
             row = QWidget()
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 0, 0, 0)
-            rl.setSpacing(4)
+            rl.setSpacing(3)
             rl.addWidget(lbl)
             if index < 6:
                 meter = QProgressBar()
                 meter.setRange(0, 100)
                 meter.setTextVisible(False)
                 meter.setMinimumWidth(0)
-                meter.setFixedHeight(6)
+                meter.setFixedHeight(5)
                 meter.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
                 meter.setStyleSheet(
                     "QProgressBar { background-color: #0b2943; border: 1px solid #123d5d; border-radius: 4px; }"
                     "QProgressBar::chunk { background-color: #32e2ef; border: none; border-radius: 4px; }"
                 )
                 meter_glow = QGraphicsDropShadowEffect(meter)
-                meter_glow.setBlurRadius(7)
+                meter_glow.setBlurRadius(5)
                 meter_glow.setColor(QColor(35, 216, 242, 95))
                 meter_glow.setOffset(0, 0)
                 meter.setGraphicsEffect(meter_glow)
@@ -183,7 +183,7 @@ class Overlay(QWidget):
                 rl.addStretch(1)
             rl.addWidget(val)
             row.setStyleSheet("background: transparent;")
-            row.setFixedHeight(38)
+            row.setFixedHeight(30)
 
             layout.addWidget(row)
             self.rows.append(val)
@@ -445,11 +445,11 @@ class Overlay(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        panel = self.rect().adjusted(6, 6, -7, -7)
-        for width, alpha in ((13, 14), (8, 28), (4, 48)):
+        panel = self.rect().adjusted(5, 5, -6, -6)
+        for width, alpha in ((10, 14), (6, 28), (3, 48)):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(QPen(QColor(35, 196, 245, alpha), width))
-            painter.drawRoundedRect(panel, 18, 18)
+            painter.drawRoundedRect(panel, 14, 14)
 
         gradient = QLinearGradient(0.0, 0.0, float(self.width()), float(self.height()))
         gradient.setColorAt(0, QColor(10, 39, 67, 250))
@@ -461,12 +461,12 @@ class Overlay(QWidget):
         border.setColorAt(0.5, QColor(25, 127, 225, 255))
         border.setColorAt(1, QColor(56, 218, 255, 255))
         painter.setPen(QPen(QBrush(border), 2))
-        painter.drawRoundedRect(panel, 18, 18)
+        painter.drawRoundedRect(panel, 14, 14)
 
-        inner = panel.adjusted(10, 10, -10, -10)
+        inner = panel.adjusted(8, 8, -8, -8)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(57, 177, 222, 85), 1))
-        painter.drawRoundedRect(inner, 14, 14)
+        painter.drawRoundedRect(inner, 11, 11)
 
     def update_stats(self):
         cpu = psutil.cpu_percent(interval=None)
