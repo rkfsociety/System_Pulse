@@ -21,7 +21,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
     encoding="utf-8",
 )
-from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QSystemTrayIcon, QMenu, QFrame
+from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSystemTrayIcon, QMenu, QFrame, QProgressBar
 from PyQt6.QtCore import Qt, QTimer, QPoint
 from PyQt6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QIcon, QPixmap, QAction, QLinearGradient
 
@@ -120,7 +120,7 @@ class Overlay(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowOpacity(0.96)
-        self.setFixedWidth(226)
+        self.setFixedWidth(244)
 
         try:
             pynvml.nvmlInit()
@@ -130,14 +130,36 @@ class Overlay(QWidget):
             self._gpu_ok = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(13, 11, 13, 11)
-        layout.setSpacing(2)
+        layout.setContentsMargins(14, 11, 14, 11)
+        layout.setSpacing(3)
 
         font_val = QFont("Consolas", 10, QFont.Weight.Bold)
         font_label = QFont("Segoe UI", 7)
 
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 2)
+        title = QLabel("SYSTEM PULSE")
+        title.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        title.setStyleSheet("color: #c5dce7; letter-spacing: 1px;")
+        header.addWidget(title)
+        header.addStretch()
+        live = QLabel("●  LIVE")
+        live.setFont(QFont("Segoe UI", 6, QFont.Weight.Bold))
+        live.setStyleSheet("color: #62e6bd; letter-spacing: 0.5px;")
+        header.addWidget(live)
+        layout.addLayout(header)
+
+        def add_separator():
+            separator = QFrame()
+            separator.setFixedHeight(1)
+            separator.setStyleSheet("background-color: rgba(110, 199, 222, 48); border: none;")
+            layout.addWidget(separator)
+
+        add_separator()
+
         self.rows = []
-        for name in ("CPU", "RAM", "GPU", "VRAM", "NET ↓", "NET ↑", "UPTIME"):
+        self.meters = []
+        for index, name in enumerate(("CPU", "RAM", "GPU", "VRAM", "NET ↓", "NET ↑", "UPTIME")):
             lbl = QLabel(name)
             lbl.setFont(font_label)
             lbl.setStyleSheet("color: #8294a8;")
@@ -148,20 +170,32 @@ class Overlay(QWidget):
             val.setAlignment(Qt.AlignmentFlag.AlignRight)
 
             row = QWidget()
-            from PyQt6.QtWidgets import QHBoxLayout
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 0, 0, 0)
             rl.addWidget(lbl)
             rl.addWidget(val)
             row.setStyleSheet("background: transparent;")
 
-            layout.addWidget(row)
+            block = QWidget()
+            block_layout = QVBoxLayout(block)
+            block_layout.setContentsMargins(0, 0, 0, 0)
+            block_layout.setSpacing(2)
+            block_layout.addWidget(row)
             self.rows.append(val)
-            if name != "UPTIME":
-                separator = QFrame()
-                separator.setFixedHeight(1)
-                separator.setStyleSheet("background-color: rgba(110, 199, 222, 34); border: none;")
-                layout.addWidget(separator)
+            if index < 4:
+                meter = QProgressBar()
+                meter.setRange(0, 100)
+                meter.setTextVisible(False)
+                meter.setFixedHeight(3)
+                meter.setStyleSheet(
+                    "QProgressBar { background-color: #172636; border: none; border-radius: 2px; }"
+                    "QProgressBar::chunk { background-color: #62e6bd; border-radius: 2px; }"
+                )
+                block_layout.addWidget(meter)
+                self.meters.append(meter)
+            layout.addWidget(block)
+            if index == 3 or index == 5:
+                add_separator()
 
         net = psutil.net_io_counters()
         self._prev_recv = net.bytes_recv
@@ -436,20 +470,31 @@ class Overlay(QWidget):
             else:             return f"{b/1024**2:.1f} MB/s"
 
         def load_color(v):
-            if v < 50:  return "#62e6bd"
-            elif v < 80: return "#ffcc00"
-            else:        return "#ff4444"
-
-        def mem_color(v):
-            if v < 60:  return "#62e6bd"
+            if v < 65:  return "#62e6bd"
             elif v < 85: return "#ffcc00"
             else:        return "#ff4444"
 
+        def mem_color(v):
+            if v < 80:  return "#62e6bd"
+            elif v < 90: return "#ffcc00"
+            else:        return "#ff4444"
+
+        def set_meter(index, value, color):
+            self.meters[index].setValue(max(0, min(100, int(value))))
+            self.meters[index].setStyleSheet(
+                "QProgressBar { background-color: #172636; border: none; border-radius: 2px; }"
+                f"QProgressBar::chunk {{ background-color: {color}; border-radius: 2px; }}"
+            )
+
         self.rows[0].setText(f"{cpu:.0f}%")
-        self.rows[0].setStyleSheet(f"color: {load_color(cpu)};")
+        cpu_color = load_color(cpu)
+        self.rows[0].setStyleSheet(f"color: {cpu_color};")
+        set_meter(0, cpu, cpu_color)
 
         self.rows[1].setText(f"{ram.percent:.0f}%  {ram.used/1024**3:.1f}G")
-        self.rows[1].setStyleSheet(f"color: {mem_color(ram.percent)};")
+        ram_color = mem_color(ram.percent)
+        self.rows[1].setStyleSheet(f"color: {ram_color};")
+        set_meter(1, ram.percent, ram_color)
 
         if self._gpu_ok:
             try:
@@ -458,22 +503,30 @@ class Overlay(QWidget):
                 vram_pct = mem.used / mem.total * 100
 
                 self.rows[2].setText(f"{util.gpu:.0f}%")
-                self.rows[2].setStyleSheet(f"color: {load_color(util.gpu)};")
+                gpu_color = load_color(util.gpu)
+                self.rows[2].setStyleSheet(f"color: {gpu_color};")
+                set_meter(2, util.gpu, gpu_color)
 
                 self.rows[3].setText(f"{mem.used/1024**3:.1f}/{mem.total/1024**3:.0f}G")
-                self.rows[3].setStyleSheet(f"color: {mem_color(vram_pct)};")
+                vram_color = mem_color(vram_pct)
+                self.rows[3].setStyleSheet(f"color: {vram_color};")
+                set_meter(3, vram_pct, vram_color)
             except Exception:
                 self.rows[2].setText("—")
                 self.rows[3].setText("—")
+                set_meter(2, 0, "#8294a8")
+                set_meter(3, 0, "#8294a8")
         else:
             self.rows[2].setText("N/A")
             self.rows[3].setText("N/A")
+            set_meter(2, 0, "#8294a8")
+            set_meter(3, 0, "#8294a8")
 
         self.rows[4].setText(fmt_bytes(recv_speed))
         self.rows[4].setStyleSheet("color: #62cfff;")
 
         self.rows[5].setText(fmt_bytes(sent_speed))
-        self.rows[5].setStyleSheet("color: #88dce8;")
+        self.rows[5].setStyleSheet("color: #ffb76b;")
 
         uptime = max(0, int(time.time() - psutil.boot_time()))
         hours, remainder = divmod(uptime, 3600)
