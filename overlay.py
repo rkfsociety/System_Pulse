@@ -3,7 +3,9 @@ import ctypes
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
+import tempfile
 import time
 import warnings
 from ctypes import wintypes
@@ -106,6 +108,7 @@ class Overlay(QWidget):
         self._active_window_key = None
         self._active_application_key = None
         self._active_window_rect = None
+        self._window_identity_cache = None
         self._move_target_hwnd = None
         self._move_target_window_key = None
         self._move_target_application_key = None
@@ -183,10 +186,10 @@ class Overlay(QWidget):
         visibility_action.toggled.connect(self.setVisible)
         tray_menu.addAction(visibility_action)
 
-        move_action = QAction("Переместить оверлей", self)
-        move_action.setCheckable(True)
-        move_action.toggled.connect(self.set_move_enabled)
-        tray_menu.addAction(move_action)
+        self.move_action = QAction("Переместить оверлей", self)
+        self.move_action.setCheckable(True)
+        self.move_action.toggled.connect(self.set_move_enabled)
+        tray_menu.addAction(self.move_action)
         tray_menu.addSeparator()
         quit_action = QAction("Выход", self)
         quit_action.triggered.connect(QApplication.instance().quit)
@@ -213,6 +216,10 @@ class Overlay(QWidget):
         else:
             self._move_enabled = False
             set_clickthrough(int(self.winId()), True)
+            if self.move_action.isChecked():
+                self.move_action.blockSignals(True)
+                self.move_action.setChecked(False)
+                self.move_action.blockSignals(False)
             self.save_position()
             self._move_target_hwnd = None
             self._move_target_window_key = None
@@ -240,8 +247,7 @@ class Overlay(QWidget):
             window_rect = self._move_target_rect or self._active_window_rect
             if window_key and window_rect:
                 positions = settings.get("window_positions")
-                if not isinstance(positions, dict):
-                    positions = {}
+                positions = dict(positions) if isinstance(positions, dict) else {}
                 offset = {
                     "x": self.x() - window_rect.left,
                     "y": self.y() - window_rect.top,
@@ -250,13 +256,26 @@ class Overlay(QWidget):
                 settings["window_positions"] = positions
                 if application_key:
                     app_positions = settings.get("application_positions")
-                    if not isinstance(app_positions, dict):
-                        app_positions = {}
+                    app_positions = dict(app_positions) if isinstance(app_positions, dict) else {}
                     app_positions[application_key] = offset
                     settings["application_positions"] = app_positions
-            self._settings = settings
-            with SETTINGS_PATH.open("w", encoding="utf-8") as file:
-                json.dump(settings, file, ensure_ascii=False, indent=2)
+            temporary_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=SETTINGS_PATH.parent,
+                    prefix=f"{SETTINGS_PATH.name}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as file:
+                    temporary_path = Path(file.name)
+                    json.dump(settings, file, ensure_ascii=False, indent=2)
+                os.replace(temporary_path, SETTINGS_PATH)
+                self._settings = settings
+            finally:
+                if temporary_path is not None and temporary_path.exists():
+                    temporary_path.unlink()
         except Exception:
             logging.exception("Не удалось сохранить позицию оверлея")
 
@@ -266,6 +285,15 @@ class Overlay(QWidget):
         if not user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)) or not pid.value:
             return None
 
+        class_buffer = ctypes.create_unicode_buffer(256)
+        title_buffer = ctypes.create_unicode_buffer(1024)
+        user32.GetClassNameW(hwnd, class_buffer, len(class_buffer))
+        user32.GetWindowTextW(hwnd, title_buffer, len(title_buffer))
+        signature = (int(hwnd), pid.value, class_buffer.value, title_buffer.value)
+        cached = self._window_identity_cache
+        if cached and cached[0] == signature:
+            return cached[1]
+
         process = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
         if not process:
             return None
@@ -274,16 +302,14 @@ class Overlay(QWidget):
             path_length = wintypes.DWORD(len(path_buffer))
             if not kernel32.QueryFullProcessImageNameW(process, 0, path_buffer, ctypes.byref(path_length)):
                 return None
-            class_buffer = ctypes.create_unicode_buffer(256)
-            title_buffer = ctypes.create_unicode_buffer(1024)
-            user32.GetClassNameW(hwnd, class_buffer, len(class_buffer))
-            user32.GetWindowTextW(hwnd, title_buffer, len(title_buffer))
             app_identity = "\0".join((path_buffer.value.casefold(), class_buffer.value))
             window_identity = "\0".join((app_identity, title_buffer.value))
-            return (
+            identities = (
                 hashlib.sha256(window_identity.encode("utf-8", errors="replace")).hexdigest(),
                 hashlib.sha256(app_identity.encode("utf-8", errors="replace")).hexdigest(),
             )
+            self._window_identity_cache = (signature, identities)
+            return identities
         finally:
             kernel32.CloseHandle(process)
 
@@ -388,8 +414,8 @@ class Overlay(QWidget):
         ram = psutil.virtual_memory()
         net = psutil.net_io_counters()
 
-        recv_speed = net.bytes_recv - self._prev_recv
-        sent_speed = net.bytes_sent - self._prev_sent
+        recv_speed = max(0, net.bytes_recv - self._prev_recv)
+        sent_speed = max(0, net.bytes_sent - self._prev_sent)
         self._prev_recv = net.bytes_recv
         self._prev_sent = net.bytes_sent
 
