@@ -21,7 +21,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
     encoding="utf-8",
 )
-from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSystemTrayIcon, QMenu, QFrame, QProgressBar
+from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSystemTrayIcon, QMenu, QFrame, QProgressBar, QGraphicsDropShadowEffect
 from PyQt6.QtCore import Qt, QTimer, QPoint
 from PyQt6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QIcon, QPixmap, QAction, QLinearGradient
 
@@ -120,7 +120,7 @@ class Overlay(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowOpacity(1.0)
-        self.setFixedWidth(320)
+        self.setFixedWidth(360)
 
         try:
             pynvml.nvmlInit()
@@ -130,25 +130,30 @@ class Overlay(QWidget):
             self._gpu_ok = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(32, 30, 32, 30)
         layout.setSpacing(0)
 
-        font_val = QFont("Segoe UI", 12, QFont.Weight.DemiBold)
-        font_label = QFont("Segoe UI", 11, QFont.Weight.Medium)
+        font_val = QFont("Segoe UI", 15, QFont.Weight.DemiBold)
+        font_label = QFont("Segoe UI", 14, QFont.Weight.Medium)
 
         self.rows = []
         self.meters = []
         for index, name in enumerate(("CPU", "RAM", "GPU", "VRAM", "NET ↓", "NET ↑", "UPTIME")):
             lbl = QLabel(name)
             lbl.setFont(font_label)
-            lbl.setStyleSheet("color: #d9e8f5;")
-            lbl.setFixedWidth(66)
+            lbl.setStyleSheet("color: #e3f0fc;")
+            lbl.setFixedWidth(56)
 
             val = QLabel("—")
             val.setFont(font_val)
             val.setStyleSheet("color: #43e5ee;")
             val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            val.setFixedWidth(90)
+            val.setFixedWidth(110)
+            value_glow = QGraphicsDropShadowEffect(val)
+            value_glow.setBlurRadius(10)
+            value_glow.setColor(QColor(36, 218, 247, 120))
+            value_glow.setOffset(0, 0)
+            val.setGraphicsEffect(value_glow)
 
             row = QWidget()
             rl = QHBoxLayout(row)
@@ -164,13 +169,18 @@ class Overlay(QWidget):
                     "QProgressBar { background-color: #0b2943; border: 1px solid #123d5d; border-radius: 4px; }"
                     "QProgressBar::chunk { background-color: #32e2ef; border: none; border-radius: 4px; }"
                 )
+                meter_glow = QGraphicsDropShadowEffect(meter)
+                meter_glow.setBlurRadius(9)
+                meter_glow.setColor(QColor(35, 216, 242, 95))
+                meter_glow.setOffset(0, 0)
+                meter.setGraphicsEffect(meter_glow)
                 rl.addWidget(meter, 1)
                 self.meters.append(meter)
             else:
                 rl.addStretch(1)
             rl.addWidget(val)
             row.setStyleSheet("background: transparent;")
-            row.setFixedHeight(46)
+            row.setFixedHeight(48)
 
             layout.addWidget(row)
             self.rows.append(val)
@@ -430,7 +440,7 @@ class Overlay(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         panel = self.rect().adjusted(8, 8, -9, -9)
-        for width, alpha in ((9, 13), (5, 22)):
+        for width, alpha in ((16, 14), (10, 28), (5, 48)):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(QPen(QColor(35, 196, 245, alpha), width))
             painter.drawRoundedRect(panel, 23, 23)
@@ -449,7 +459,7 @@ class Overlay(QWidget):
 
         inner = panel.adjusted(12, 12, -12, -12)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor(57, 177, 222, 55), 1))
+        painter.setPen(QPen(QColor(57, 177, 222, 85), 1))
         painter.drawRoundedRect(inner, 17, 17)
 
     def update_stats(self):
@@ -472,7 +482,7 @@ class Overlay(QWidget):
 
         self.rows[1].setText(
             f'<span style="color:#43e5ee">{ram.percent:.0f}%</span>'
-            f'<span style="color:#d9e8f5"> {ram.used/1024**3:.1f}G</span>'
+            f'<span style="color:#e3f0fc"> {ram.used/1024**3:.1f}G</span>'
         )
         self.meters[1].setValue(round(ram.percent))
 
@@ -487,7 +497,7 @@ class Overlay(QWidget):
 
                 self.rows[3].setText(
                     f'<span style="color:#43e5ee">{mem.used/1024**3:.1f}</span>'
-                    f'<span style="color:#d9e8f5">/{mem.total/1024**3:.0f}G</span>'
+                    f'<span style="color:#e3f0fc">/{mem.total/1024**3:.0f}G</span>'
                 )
                 self.meters[3].setValue(round(vram_pct))
             except Exception:
@@ -502,10 +512,10 @@ class Overlay(QWidget):
             self.meters[3].setValue(0)
 
         self.rows[4].setText(fmt_bytes(recv_speed))
-        self.meters[4].setValue(min(100, round(recv_speed / (25 * 1024**2) * 100)))
+        self.meters[4].setValue(min(100, max(2 if recv_speed else 0, round(recv_speed / (25 * 1024**2) * 100))))
 
         self.rows[5].setText(fmt_bytes(sent_speed))
-        self.meters[5].setValue(min(100, round(sent_speed / (384 * 1024) * 100)))
+        self.meters[5].setValue(min(100, max(2 if sent_speed else 0, round(sent_speed / (384 * 1024) * 100))))
 
         uptime = max(0, int(time.time() - psutil.boot_time()))
         hours, remainder = divmod(uptime, 3600)
