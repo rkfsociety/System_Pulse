@@ -30,6 +30,7 @@ WS_EX_LAYERED     = 0x00080000
 WS_EX_TRANSPARENT = 0x00000020
 ERROR_ALREADY_EXISTS = 183
 GA_ROOT = 2
+POSITION_MERGE_TOLERANCE = 4
 
 user32 = ctypes.windll.user32
 user32.GetForegroundWindow.restype = wintypes.HWND
@@ -394,6 +395,9 @@ class Overlay(QWidget):
             if isinstance(saved, dict) and isinstance(saved.get("x"), int) and isinstance(saved.get("y"), int):
                 x, y = rect.left + saved["x"], rect.top + saved["y"]
             else:
+                x, y = self.x(), self.y()
+            if (abs(x - self.x()) <= POSITION_MERGE_TOLERANCE and
+                    abs(y - self.y()) <= POSITION_MERGE_TOLERANCE):
                 x, y = self.x(), self.y()
             self.move(x, y)
             self._positioned_window_key = self._active_window_key
