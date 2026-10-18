@@ -119,8 +119,8 @@ class Overlay(QWidget):
             Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setWindowOpacity(0.96)
-        self.setFixedWidth(244)
+        self.setWindowOpacity(1.0)
+        self.setFixedWidth(320)
 
         try:
             pynvml.nvmlInit()
@@ -130,72 +130,57 @@ class Overlay(QWidget):
             self._gpu_ok = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 11, 14, 11)
-        layout.setSpacing(3)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(0)
 
-        font_val = QFont("Consolas", 10, QFont.Weight.Bold)
-        font_label = QFont("Segoe UI", 7)
-
-        header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 2)
-        title = QLabel("SYSTEM PULSE")
-        title.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
-        title.setStyleSheet("color: #c5dce7; letter-spacing: 1px;")
-        header.addWidget(title)
-        header.addStretch()
-        live = QLabel("●  LIVE")
-        live.setFont(QFont("Segoe UI", 6, QFont.Weight.Bold))
-        live.setStyleSheet("color: #62e6bd; letter-spacing: 0.5px;")
-        header.addWidget(live)
-        layout.addLayout(header)
-
-        def add_separator():
-            separator = QFrame()
-            separator.setFixedHeight(1)
-            separator.setStyleSheet("background-color: rgba(110, 199, 222, 48); border: none;")
-            layout.addWidget(separator)
-
-        add_separator()
+        font_val = QFont("Segoe UI", 12, QFont.Weight.DemiBold)
+        font_label = QFont("Segoe UI", 11, QFont.Weight.Medium)
 
         self.rows = []
         self.meters = []
         for index, name in enumerate(("CPU", "RAM", "GPU", "VRAM", "NET ↓", "NET ↑", "UPTIME")):
             lbl = QLabel(name)
             lbl.setFont(font_label)
-            lbl.setStyleSheet("color: #8294a8;")
+            lbl.setStyleSheet("color: #d9e8f5;")
+            lbl.setFixedWidth(66)
 
             val = QLabel("—")
             val.setFont(font_val)
-            val.setStyleSheet("color: #e8f5ff;")
-            val.setAlignment(Qt.AlignmentFlag.AlignRight)
+            val.setStyleSheet("color: #43e5ee;")
+            val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            val.setFixedWidth(90)
 
             row = QWidget()
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(8)
             rl.addWidget(lbl)
-            rl.addWidget(val)
-            row.setStyleSheet("background: transparent;")
-
-            block = QWidget()
-            block_layout = QVBoxLayout(block)
-            block_layout.setContentsMargins(0, 0, 0, 0)
-            block_layout.setSpacing(2)
-            block_layout.addWidget(row)
-            self.rows.append(val)
-            if index < 4:
+            if index < 6:
                 meter = QProgressBar()
                 meter.setRange(0, 100)
                 meter.setTextVisible(False)
-                meter.setFixedHeight(3)
+                meter.setFixedHeight(8)
                 meter.setStyleSheet(
-                    "QProgressBar { background-color: #172636; border: none; border-radius: 2px; }"
-                    "QProgressBar::chunk { background-color: #62e6bd; border-radius: 2px; }"
+                    "QProgressBar { background-color: #0b2943; border: 1px solid #123d5d; border-radius: 4px; }"
+                    "QProgressBar::chunk { background-color: #32e2ef; border: none; border-radius: 4px; }"
                 )
-                block_layout.addWidget(meter)
+                rl.addWidget(meter, 1)
                 self.meters.append(meter)
-            layout.addWidget(block)
-            if index == 3 or index == 5:
-                add_separator()
+            else:
+                rl.addStretch(1)
+            rl.addWidget(val)
+            row.setStyleSheet("background: transparent;")
+            row.setFixedHeight(46)
+
+            layout.addWidget(row)
+            self.rows.append(val)
+            if index < 6:
+                separator = QFrame()
+                separator.setFixedHeight(1)
+                separator.setStyleSheet("background-color: rgba(35, 126, 184, 145); border: none;")
+                layout.addWidget(separator)
+        self.rows[1].setTextFormat(Qt.TextFormat.RichText)
+        self.rows[3].setTextFormat(Qt.TextFormat.RichText)
 
         net = psutil.net_io_counters()
         self._prev_recv = net.bytes_recv
@@ -444,15 +429,28 @@ class Overlay(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        panel = self.rect().adjusted(0, 0, -1, -1)
-        gradient = QLinearGradient(0, 0, self.width(), self.height())
-        gradient.setColorAt(0, QColor(13, 23, 37, 238))
-        gradient.setColorAt(1, QColor(9, 17, 29, 230))
+        panel = self.rect().adjusted(8, 8, -9, -9)
+        for width, alpha in ((9, 13), (5, 22)):
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(35, 196, 245, alpha), width))
+            painter.drawRoundedRect(panel, 23, 23)
+
+        gradient = QLinearGradient(0.0, 0.0, float(self.width()), float(self.height()))
+        gradient.setColorAt(0, QColor(10, 39, 67, 250))
+        gradient.setColorAt(0.52, QColor(5, 21, 40, 252))
+        gradient.setColorAt(1, QColor(8, 30, 53, 250))
         painter.setBrush(QBrush(gradient))
-        painter.setPen(QPen(QColor(91, 190, 218, 115), 1))
-        painter.drawRoundedRect(panel, 12, 12)
-        painter.setPen(QPen(QColor(105, 218, 235, 75), 1))
-        painter.drawLine(14, 1, self.width() - 15, 1)
+        border = QLinearGradient(0.0, 0.0, float(self.width()), float(self.height()))
+        border.setColorAt(0, QColor(61, 232, 255, 255))
+        border.setColorAt(0.5, QColor(25, 127, 225, 255))
+        border.setColorAt(1, QColor(56, 218, 255, 255))
+        painter.setPen(QPen(QBrush(border), 2))
+        painter.drawRoundedRect(panel, 23, 23)
+
+        inner = panel.adjusted(12, 12, -12, -12)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(57, 177, 222, 55), 1))
+        painter.drawRoundedRect(inner, 17, 17)
 
     def update_stats(self):
         cpu = psutil.cpu_percent(interval=None)
@@ -469,32 +467,14 @@ class Overlay(QWidget):
             elif b < 1024**2: return f"{b/1024:.0f} KB/s"
             else:             return f"{b/1024**2:.1f} MB/s"
 
-        def load_color(v):
-            if v < 65:  return "#62e6bd"
-            elif v < 85: return "#ffcc00"
-            else:        return "#ff4444"
-
-        def mem_color(v):
-            if v < 80:  return "#62e6bd"
-            elif v < 90: return "#ffcc00"
-            else:        return "#ff4444"
-
-        def set_meter(index, value, color):
-            self.meters[index].setValue(max(0, min(100, int(value))))
-            self.meters[index].setStyleSheet(
-                "QProgressBar { background-color: #172636; border: none; border-radius: 2px; }"
-                f"QProgressBar::chunk {{ background-color: {color}; border-radius: 2px; }}"
-            )
-
         self.rows[0].setText(f"{cpu:.0f}%")
-        cpu_color = load_color(cpu)
-        self.rows[0].setStyleSheet(f"color: {cpu_color};")
-        set_meter(0, cpu, cpu_color)
+        self.meters[0].setValue(round(cpu))
 
-        self.rows[1].setText(f"{ram.percent:.0f}%  {ram.used/1024**3:.1f}G")
-        ram_color = mem_color(ram.percent)
-        self.rows[1].setStyleSheet(f"color: {ram_color};")
-        set_meter(1, ram.percent, ram_color)
+        self.rows[1].setText(
+            f'<span style="color:#43e5ee">{ram.percent:.0f}%</span>'
+            f'<span style="color:#d9e8f5"> {ram.used/1024**3:.1f}G</span>'
+        )
+        self.meters[1].setValue(round(ram.percent))
 
         if self._gpu_ok:
             try:
@@ -503,36 +483,34 @@ class Overlay(QWidget):
                 vram_pct = mem.used / mem.total * 100
 
                 self.rows[2].setText(f"{util.gpu:.0f}%")
-                gpu_color = load_color(util.gpu)
-                self.rows[2].setStyleSheet(f"color: {gpu_color};")
-                set_meter(2, util.gpu, gpu_color)
+                self.meters[2].setValue(round(util.gpu))
 
-                self.rows[3].setText(f"{mem.used/1024**3:.1f}/{mem.total/1024**3:.0f}G")
-                vram_color = mem_color(vram_pct)
-                self.rows[3].setStyleSheet(f"color: {vram_color};")
-                set_meter(3, vram_pct, vram_color)
+                self.rows[3].setText(
+                    f'<span style="color:#43e5ee">{mem.used/1024**3:.1f}</span>'
+                    f'<span style="color:#d9e8f5">/{mem.total/1024**3:.0f}G</span>'
+                )
+                self.meters[3].setValue(round(vram_pct))
             except Exception:
                 self.rows[2].setText("—")
                 self.rows[3].setText("—")
-                set_meter(2, 0, "#8294a8")
-                set_meter(3, 0, "#8294a8")
+                self.meters[2].setValue(0)
+                self.meters[3].setValue(0)
         else:
             self.rows[2].setText("N/A")
             self.rows[3].setText("N/A")
-            set_meter(2, 0, "#8294a8")
-            set_meter(3, 0, "#8294a8")
+            self.meters[2].setValue(0)
+            self.meters[3].setValue(0)
 
         self.rows[4].setText(fmt_bytes(recv_speed))
-        self.rows[4].setStyleSheet("color: #62cfff;")
+        self.meters[4].setValue(min(100, round(recv_speed / (25 * 1024**2) * 100)))
 
         self.rows[5].setText(fmt_bytes(sent_speed))
-        self.rows[5].setStyleSheet("color: #ffb76b;")
+        self.meters[5].setValue(min(100, round(sent_speed / (384 * 1024) * 100)))
 
         uptime = max(0, int(time.time() - psutil.boot_time()))
         hours, remainder = divmod(uptime, 3600)
         minutes, seconds = divmod(remainder, 60)
         self.rows[6].setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
-        self.rows[6].setStyleSheet("color: #e8f5ff;")
 
 
 if __name__ == "__main__":
