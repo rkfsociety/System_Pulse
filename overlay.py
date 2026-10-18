@@ -192,9 +192,6 @@ class Overlay(QWidget):
                 separator.setFixedHeight(1)
                 separator.setStyleSheet("background-color: rgba(35, 126, 184, 145); border: none;")
                 layout.addWidget(separator)
-        self.rows[1].setTextFormat(Qt.TextFormat.RichText)
-        self.rows[3].setTextFormat(Qt.TextFormat.RichText)
-
         net = psutil.net_io_counters()
         self._prev_recv = net.bytes_recv
         self._prev_sent = net.bytes_sent
@@ -484,13 +481,10 @@ class Overlay(QWidget):
             else:             return f"{b/1024**2:.1f} MB/s"
 
         self.rows[0].setText(f"{cpu:.0f}%")
-        self.meters[0].setValue(round(cpu))
+        self._set_meter(0, cpu)
 
-        self.rows[1].setText(
-            f'<span style="color:#43e5ee">{ram.percent:.0f}%</span>'
-            f'<span style="color:#e3f0fc"> {ram.used/1024**3:.1f}G</span>'
-        )
-        self.meters[1].setValue(round(ram.percent))
+        self.rows[1].setText(f"{ram.percent:.0f}%")
+        self._set_meter(1, ram.percent)
 
         if self._gpu_ok:
             try:
@@ -499,34 +493,56 @@ class Overlay(QWidget):
                 vram_pct = mem.used / mem.total * 100
 
                 self.rows[2].setText(f"{util.gpu:.0f}%")
-                self.meters[2].setValue(round(util.gpu))
+                self._set_meter(2, util.gpu)
 
-                self.rows[3].setText(
-                    f'<span style="color:#43e5ee">{mem.used/1024**3:.1f}</span>'
-                    f'<span style="color:#e3f0fc">/{mem.total/1024**3:.0f}G</span>'
-                )
-                self.meters[3].setValue(round(vram_pct))
+                self.rows[3].setText(f"{vram_pct:.0f}%")
+                self._set_meter(3, vram_pct)
             except Exception:
                 self.rows[2].setText("—")
                 self.rows[3].setText("—")
-                self.meters[2].setValue(0)
-                self.meters[3].setValue(0)
+                self._set_meter(2, 0)
+                self._set_meter(3, 0)
         else:
             self.rows[2].setText("N/A")
             self.rows[3].setText("N/A")
-            self.meters[2].setValue(0)
-            self.meters[3].setValue(0)
+            self._set_meter(2, 0)
+            self._set_meter(3, 0)
 
         self.rows[4].setText(fmt_bytes(recv_speed))
-        self.meters[4].setValue(min(100, max(2 if recv_speed else 0, round(recv_speed / (25 * 1024**2) * 100))))
+        self._set_meter(4, min(100, max(2 if recv_speed else 0, round(recv_speed / (25 * 1024**2) * 100))))
 
         self.rows[5].setText(fmt_bytes(sent_speed))
-        self.meters[5].setValue(min(100, max(2 if sent_speed else 0, round(sent_speed / (384 * 1024) * 100))))
+        self._set_meter(5, min(100, max(2 if sent_speed else 0, round(sent_speed / (384 * 1024) * 100))))
 
         uptime = max(0, int(time.time() - psutil.boot_time()))
         hours, remainder = divmod(uptime, 3600)
         minutes, seconds = divmod(remainder, 60)
         self.rows[6].setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+
+    @staticmethod
+    def _load_color(value):
+        if value <= 60:
+            return "#4cff91"
+        if value <= 85:
+            return "#ffd166"
+        return "#ff5c6c"
+
+    def _set_meter(self, index, value):
+        value = min(100, max(0, round(value)))
+        color = self._load_color(value)
+        self.meters[index].setValue(value)
+        self.meters[index].setStyleSheet(
+            "QProgressBar { background-color: #0b2943; border: 1px solid #123d5d; border-radius: 4px; }"
+            f"QProgressBar::chunk {{ background-color: {color}; border: none; border-radius: 4px; }}"
+        )
+        if index < 4:
+            self.rows[index].setStyleSheet(f"color: {color};")
+            glow = self.rows[index].graphicsEffect()
+            if glow:
+                glow.setColor(QColor(color))
+        glow = self.meters[index].graphicsEffect()
+        if glow:
+            glow.setColor(QColor(color))
 
 
 if __name__ == "__main__":
