@@ -452,9 +452,9 @@ class Overlay(QWidget):
             painter.drawRoundedRect(panel, 14, 14)
 
         gradient = QLinearGradient(0.0, 0.0, float(self.width()), float(self.height()))
-        gradient.setColorAt(0, QColor(10, 39, 67, 250))
-        gradient.setColorAt(0.52, QColor(5, 21, 40, 252))
-        gradient.setColorAt(1, QColor(8, 30, 53, 250))
+        gradient.setColorAt(0, QColor(10, 39, 67, 195))
+        gradient.setColorAt(0.52, QColor(5, 21, 40, 180))
+        gradient.setColorAt(1, QColor(8, 30, 53, 195))
         painter.setBrush(QBrush(gradient))
         border = QLinearGradient(0.0, 0.0, float(self.width()), float(self.height()))
         border.setColorAt(0, QColor(61, 232, 255, 255))
