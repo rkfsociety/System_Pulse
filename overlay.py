@@ -21,9 +21,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
     encoding="utf-8",
 )
-from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QSystemTrayIcon, QMenu
+from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QSystemTrayIcon, QMenu, QFrame
 from PyQt6.QtCore import Qt, QTimer, QPoint
-from PyQt6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QIcon, QPixmap, QAction
+from PyQt6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QIcon, QPixmap, QAction, QLinearGradient
 
 GWL_EXSTYLE       = -20
 WS_EX_LAYERED     = 0x00080000
@@ -119,8 +119,8 @@ class Overlay(QWidget):
             Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setWindowOpacity(0.85)
-        self.setFixedWidth(210)
+        self.setWindowOpacity(0.96)
+        self.setFixedWidth(226)
 
         try:
             pynvml.nvmlInit()
@@ -130,21 +130,21 @@ class Overlay(QWidget):
             self._gpu_ok = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(4)
+        layout.setContentsMargins(13, 11, 13, 11)
+        layout.setSpacing(2)
 
-        font_val   = QFont("Consolas", 11, QFont.Weight.Bold)
+        font_val = QFont("Consolas", 10, QFont.Weight.Bold)
         font_label = QFont("Segoe UI", 7)
 
         self.rows = []
         for name in ("CPU", "RAM", "GPU", "VRAM", "NET ↓", "NET ↑", "UPTIME"):
             lbl = QLabel(name)
             lbl.setFont(font_label)
-            lbl.setStyleSheet("color: #aaaaaa;")
+            lbl.setStyleSheet("color: #8294a8;")
 
             val = QLabel("—")
             val.setFont(font_val)
-            val.setStyleSheet("color: #ffffff;")
+            val.setStyleSheet("color: #e8f5ff;")
             val.setAlignment(Qt.AlignmentFlag.AlignRight)
 
             row = QWidget()
@@ -157,6 +157,11 @@ class Overlay(QWidget):
 
             layout.addWidget(row)
             self.rows.append(val)
+            if name != "UPTIME":
+                separator = QFrame()
+                separator.setFixedHeight(1)
+                separator.setStyleSheet("background-color: rgba(110, 199, 222, 34); border: none;")
+                layout.addWidget(separator)
 
         net = psutil.net_io_counters()
         self._prev_recv = net.bytes_recv
@@ -405,9 +410,15 @@ class Overlay(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QBrush(QColor(20, 20, 20, 180)))
-        painter.setPen(QPen(QColor(60, 60, 60, 200), 1))
-        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 10, 10)
+        panel = self.rect().adjusted(0, 0, -1, -1)
+        gradient = QLinearGradient(0, 0, self.width(), self.height())
+        gradient.setColorAt(0, QColor(13, 23, 37, 238))
+        gradient.setColorAt(1, QColor(9, 17, 29, 230))
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(QPen(QColor(91, 190, 218, 115), 1))
+        painter.drawRoundedRect(panel, 12, 12)
+        painter.setPen(QPen(QColor(105, 218, 235, 75), 1))
+        painter.drawLine(14, 1, self.width() - 15, 1)
 
     def update_stats(self):
         cpu = psutil.cpu_percent(interval=None)
@@ -425,12 +436,12 @@ class Overlay(QWidget):
             else:             return f"{b/1024**2:.1f} MB/s"
 
         def load_color(v):
-            if v < 50:  return "#4cff91"
+            if v < 50:  return "#62e6bd"
             elif v < 80: return "#ffcc00"
             else:        return "#ff4444"
 
         def mem_color(v):
-            if v < 60:  return "#4cff91"
+            if v < 60:  return "#62e6bd"
             elif v < 85: return "#ffcc00"
             else:        return "#ff4444"
 
@@ -459,16 +470,16 @@ class Overlay(QWidget):
             self.rows[3].setText("N/A")
 
         self.rows[4].setText(fmt_bytes(recv_speed))
-        self.rows[4].setStyleSheet("color: #4ca8ff;")
+        self.rows[4].setStyleSheet("color: #62cfff;")
 
         self.rows[5].setText(fmt_bytes(sent_speed))
-        self.rows[5].setStyleSheet("color: #ff9944;")
+        self.rows[5].setStyleSheet("color: #88dce8;")
 
         uptime = max(0, int(time.time() - psutil.boot_time()))
         hours, remainder = divmod(uptime, 3600)
         minutes, seconds = divmod(remainder, 60)
         self.rows[6].setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
-        self.rows[6].setStyleSheet("color: #ffffff;")
+        self.rows[6].setStyleSheet("color: #e8f5ff;")
 
 
 if __name__ == "__main__":
