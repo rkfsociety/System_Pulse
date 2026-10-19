@@ -3,9 +3,12 @@ import ctypes
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
+import tempfile
 import time
 import warnings
+import winreg
 from ctypes import wintypes
 import psutil
 import pynvml
@@ -19,15 +22,18 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
     encoding="utf-8",
 )
-from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QSystemTrayIcon, QMenu
+from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSystemTrayIcon, QMenu, QFrame, QProgressBar, QGraphicsDropShadowEffect, QSizePolicy
 from PyQt6.QtCore import Qt, QTimer, QPoint
-from PyQt6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QIcon, QPixmap, QAction
+from PyQt6.QtGui import QFont, QColor, QPainter, QBrush, QPen, QIcon, QPixmap, QAction, QLinearGradient
 
 GWL_EXSTYLE       = -20
 WS_EX_LAYERED     = 0x00080000
 WS_EX_TRANSPARENT = 0x00000020
 ERROR_ALREADY_EXISTS = 183
 GA_ROOT = 2
+POSITION_MERGE_TOLERANCE = 4
+AUTOSTART_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+AUTOSTART_VALUE = "SystemPulse"
 
 user32 = ctypes.windll.user32
 user32.GetForegroundWindow.restype = wintypes.HWND
@@ -106,6 +112,7 @@ class Overlay(QWidget):
         self._active_window_key = None
         self._active_application_key = None
         self._active_window_rect = None
+        self._window_identity_cache = None
         self._move_target_hwnd = None
         self._move_target_window_key = None
         self._move_target_application_key = None
@@ -116,8 +123,8 @@ class Overlay(QWidget):
             Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setWindowOpacity(0.85)
-        self.setFixedWidth(210)
+        self.setWindowOpacity(1.0)
+        self.setFixedWidth(230)
 
         try:
             pynvml.nvmlInit()
@@ -127,34 +134,67 @@ class Overlay(QWidget):
             self._gpu_ok = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(4)
+        layout.setContentsMargins(19, 20, 19, 20)
+        layout.setSpacing(0)
 
-        font_val   = QFont("Consolas", 11, QFont.Weight.Bold)
-        font_label = QFont("Segoe UI", 7)
+        font_val = QFont("Segoe UI", 10, QFont.Weight.DemiBold)
+        font_label = QFont("Segoe UI", 9, QFont.Weight.Medium)
 
         self.rows = []
-        for name in ("CPU", "RAM", "GPU", "VRAM", "NET ↓", "NET ↑", "UPTIME"):
+        self.meters = []
+        for index, name in enumerate(("CPU", "RAM", "GPU", "VRAM", "NET ↓", "NET ↑", "UPTIME")):
             lbl = QLabel(name)
             lbl.setFont(font_label)
-            lbl.setStyleSheet("color: #aaaaaa;")
+            lbl.setStyleSheet("color: #e3f0fc;")
+            lbl.setFixedWidth(46)
 
             val = QLabel("—")
             val.setFont(font_val)
-            val.setStyleSheet("color: #ffffff;")
-            val.setAlignment(Qt.AlignmentFlag.AlignRight)
+            val.setStyleSheet("color: #43e5ee;")
+            val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            val.setFixedWidth(104 if index == 6 else 72)
+            value_glow = QGraphicsDropShadowEffect(val)
+            value_glow.setBlurRadius(6)
+            value_glow.setColor(QColor(36, 218, 247, 120))
+            value_glow.setOffset(0, 0)
+            val.setGraphicsEffect(value_glow)
 
             row = QWidget()
-            from PyQt6.QtWidgets import QHBoxLayout
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(3)
             rl.addWidget(lbl)
+            if index < 6:
+                meter = QProgressBar()
+                meter.setRange(0, 100)
+                meter.setTextVisible(False)
+                meter.setMinimumWidth(0)
+                meter.setFixedHeight(5)
+                meter.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+                meter.setStyleSheet(
+                    "QProgressBar { background-color: #0b2943; border: 1px solid #123d5d; border-radius: 4px; }"
+                    "QProgressBar::chunk { background-color: #32e2ef; border: none; border-radius: 4px; }"
+                )
+                meter_glow = QGraphicsDropShadowEffect(meter)
+                meter_glow.setBlurRadius(5)
+                meter_glow.setColor(QColor(35, 216, 242, 95))
+                meter_glow.setOffset(0, 0)
+                meter.setGraphicsEffect(meter_glow)
+                rl.addWidget(meter, 1)
+                self.meters.append(meter)
+            else:
+                rl.addStretch(1)
             rl.addWidget(val)
             row.setStyleSheet("background: transparent;")
+            row.setFixedHeight(30)
 
             layout.addWidget(row)
             self.rows.append(val)
-
+            if index < 6:
+                separator = QFrame()
+                separator.setFixedHeight(1)
+                separator.setStyleSheet("background-color: rgba(35, 126, 184, 145); border: none;")
+                layout.addWidget(separator)
         net = psutil.net_io_counters()
         self._prev_recv = net.bytes_recv
         self._prev_sent = net.bytes_sent
@@ -183,10 +223,15 @@ class Overlay(QWidget):
         visibility_action.toggled.connect(self.setVisible)
         tray_menu.addAction(visibility_action)
 
-        move_action = QAction("Переместить оверлей", self)
-        move_action.setCheckable(True)
-        move_action.toggled.connect(self.set_move_enabled)
-        tray_menu.addAction(move_action)
+        self.move_action = QAction("Переместить оверлей", self)
+        self.move_action.setCheckable(True)
+        self.move_action.toggled.connect(self.set_move_enabled)
+        tray_menu.addAction(self.move_action)
+        self.autostart_action = QAction("Автозапуск при входе в Windows", self)
+        self.autostart_action.setCheckable(True)
+        self.autostart_action.setChecked(self.is_autostart_enabled())
+        self.autostart_action.toggled.connect(self.set_autostart_enabled)
+        tray_menu.addAction(self.autostart_action)
         tray_menu.addSeparator()
         quit_action = QAction("Выход", self)
         quit_action.triggered.connect(QApplication.instance().quit)
@@ -213,6 +258,10 @@ class Overlay(QWidget):
         else:
             self._move_enabled = False
             set_clickthrough(int(self.winId()), True)
+            if self.move_action.isChecked():
+                self.move_action.blockSignals(True)
+                self.move_action.setChecked(False)
+                self.move_action.blockSignals(False)
             self.save_position()
             self._move_target_hwnd = None
             self._move_target_window_key = None
@@ -230,6 +279,42 @@ class Overlay(QWidget):
             logging.exception("Не удалось загрузить настройки")
         return {}
 
+    @staticmethod
+    def is_autostart_enabled():
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_KEY, 0, winreg.KEY_READ) as key:
+                winreg.QueryValueEx(key, AUTOSTART_VALUE)
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError:
+            logging.exception("Не удалось проверить настройку автозапуска")
+            return False
+
+    def set_autostart_enabled(self, enabled):
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, AUTOSTART_KEY) as key:
+                if enabled:
+                    script_path = Path(__file__).resolve().with_name("start_overlay.vbs")
+                    wscript_path = Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "wscript.exe"
+                    command = f'"{wscript_path}" "{script_path}"'
+                    winreg.SetValueEx(key, AUTOSTART_VALUE, 0, winreg.REG_SZ, command)
+                else:
+                    try:
+                        winreg.DeleteValue(key, AUTOSTART_VALUE)
+                    except FileNotFoundError:
+                        pass
+        except OSError:
+            logging.exception("Не удалось изменить автозапуск")
+            self.autostart_action.blockSignals(True)
+            self.autostart_action.setChecked(self.is_autostart_enabled())
+            self.autostart_action.blockSignals(False)
+            self.tray_icon.showMessage(
+                "System Pulse",
+                "Не удалось изменить настройку автозапуска.",
+                QSystemTrayIcon.MessageIcon.Warning,
+            )
+
     def save_position(self):
         try:
             settings = dict(self._settings)
@@ -240,8 +325,7 @@ class Overlay(QWidget):
             window_rect = self._move_target_rect or self._active_window_rect
             if window_key and window_rect:
                 positions = settings.get("window_positions")
-                if not isinstance(positions, dict):
-                    positions = {}
+                positions = dict(positions) if isinstance(positions, dict) else {}
                 offset = {
                     "x": self.x() - window_rect.left,
                     "y": self.y() - window_rect.top,
@@ -250,13 +334,26 @@ class Overlay(QWidget):
                 settings["window_positions"] = positions
                 if application_key:
                     app_positions = settings.get("application_positions")
-                    if not isinstance(app_positions, dict):
-                        app_positions = {}
+                    app_positions = dict(app_positions) if isinstance(app_positions, dict) else {}
                     app_positions[application_key] = offset
                     settings["application_positions"] = app_positions
-            self._settings = settings
-            with SETTINGS_PATH.open("w", encoding="utf-8") as file:
-                json.dump(settings, file, ensure_ascii=False, indent=2)
+            temporary_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=SETTINGS_PATH.parent,
+                    prefix=f"{SETTINGS_PATH.name}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as file:
+                    temporary_path = Path(file.name)
+                    json.dump(settings, file, ensure_ascii=False, indent=2)
+                os.replace(temporary_path, SETTINGS_PATH)
+                self._settings = settings
+            finally:
+                if temporary_path is not None and temporary_path.exists():
+                    temporary_path.unlink()
         except Exception:
             logging.exception("Не удалось сохранить позицию оверлея")
 
@@ -266,6 +363,15 @@ class Overlay(QWidget):
         if not user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)) or not pid.value:
             return None
 
+        class_buffer = ctypes.create_unicode_buffer(256)
+        title_buffer = ctypes.create_unicode_buffer(1024)
+        user32.GetClassNameW(hwnd, class_buffer, len(class_buffer))
+        user32.GetWindowTextW(hwnd, title_buffer, len(title_buffer))
+        signature = (int(hwnd), pid.value, class_buffer.value, title_buffer.value)
+        cached = self._window_identity_cache
+        if cached and cached[0] == signature:
+            return cached[1]
+
         process = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
         if not process:
             return None
@@ -274,16 +380,14 @@ class Overlay(QWidget):
             path_length = wintypes.DWORD(len(path_buffer))
             if not kernel32.QueryFullProcessImageNameW(process, 0, path_buffer, ctypes.byref(path_length)):
                 return None
-            class_buffer = ctypes.create_unicode_buffer(256)
-            title_buffer = ctypes.create_unicode_buffer(1024)
-            user32.GetClassNameW(hwnd, class_buffer, len(class_buffer))
-            user32.GetWindowTextW(hwnd, title_buffer, len(title_buffer))
             app_identity = "\0".join((path_buffer.value.casefold(), class_buffer.value))
             window_identity = "\0".join((app_identity, title_buffer.value))
-            return (
+            identities = (
                 hashlib.sha256(window_identity.encode("utf-8", errors="replace")).hexdigest(),
                 hashlib.sha256(app_identity.encode("utf-8", errors="replace")).hexdigest(),
             )
+            self._window_identity_cache = (signature, identities)
+            return identities
         finally:
             kernel32.CloseHandle(process)
 
@@ -333,6 +437,9 @@ class Overlay(QWidget):
                 x, y = rect.left + saved["x"], rect.top + saved["y"]
             else:
                 x, y = self.x(), self.y()
+            if (abs(x - self.x()) <= POSITION_MERGE_TOLERANCE and
+                    abs(y - self.y()) <= POSITION_MERGE_TOLERANCE):
+                x, y = self.x(), self.y()
             self.move(x, y)
             self._positioned_window_key = self._active_window_key
         elif rect.left != self._active_window_rect.left or rect.top != self._active_window_rect.top:
@@ -379,17 +486,36 @@ class Overlay(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QBrush(QColor(20, 20, 20, 180)))
-        painter.setPen(QPen(QColor(60, 60, 60, 200), 1))
-        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 10, 10)
+        panel = self.rect().adjusted(5, 5, -6, -6)
+        for width, alpha in ((10, 14), (6, 28), (3, 48)):
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(35, 196, 245, alpha), width))
+            painter.drawRoundedRect(panel, 14, 14)
+
+        gradient = QLinearGradient(0.0, 0.0, float(self.width()), float(self.height()))
+        gradient.setColorAt(0, QColor(10, 39, 67, 195))
+        gradient.setColorAt(0.52, QColor(5, 21, 40, 180))
+        gradient.setColorAt(1, QColor(8, 30, 53, 195))
+        painter.setBrush(QBrush(gradient))
+        border = QLinearGradient(0.0, 0.0, float(self.width()), float(self.height()))
+        border.setColorAt(0, QColor(61, 232, 255, 255))
+        border.setColorAt(0.5, QColor(25, 127, 225, 255))
+        border.setColorAt(1, QColor(56, 218, 255, 255))
+        painter.setPen(QPen(QBrush(border), 2))
+        painter.drawRoundedRect(panel, 14, 14)
+
+        inner = panel.adjusted(8, 8, -8, -8)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(57, 177, 222, 85), 1))
+        painter.drawRoundedRect(inner, 11, 11)
 
     def update_stats(self):
         cpu = psutil.cpu_percent(interval=None)
         ram = psutil.virtual_memory()
         net = psutil.net_io_counters()
 
-        recv_speed = net.bytes_recv - self._prev_recv
-        sent_speed = net.bytes_sent - self._prev_sent
+        recv_speed = max(0, net.bytes_recv - self._prev_recv)
+        sent_speed = max(0, net.bytes_sent - self._prev_sent)
         self._prev_recv = net.bytes_recv
         self._prev_sent = net.bytes_sent
 
@@ -398,21 +524,11 @@ class Overlay(QWidget):
             elif b < 1024**2: return f"{b/1024:.0f} KB/s"
             else:             return f"{b/1024**2:.1f} MB/s"
 
-        def load_color(v):
-            if v < 50:  return "#4cff91"
-            elif v < 80: return "#ffcc00"
-            else:        return "#ff4444"
-
-        def mem_color(v):
-            if v < 60:  return "#4cff91"
-            elif v < 85: return "#ffcc00"
-            else:        return "#ff4444"
-
         self.rows[0].setText(f"{cpu:.0f}%")
-        self.rows[0].setStyleSheet(f"color: {load_color(cpu)};")
+        self._set_meter(0, cpu)
 
-        self.rows[1].setText(f"{ram.percent:.0f}%  {ram.used/1024**3:.1f}G")
-        self.rows[1].setStyleSheet(f"color: {mem_color(ram.percent)};")
+        self.rows[1].setText(f"{ram.percent:.0f}%")
+        self._set_meter(1, ram.percent)
 
         if self._gpu_ok:
             try:
@@ -421,28 +537,57 @@ class Overlay(QWidget):
                 vram_pct = mem.used / mem.total * 100
 
                 self.rows[2].setText(f"{util.gpu:.0f}%")
-                self.rows[2].setStyleSheet(f"color: {load_color(util.gpu)};")
+                self._set_meter(2, util.gpu)
 
-                self.rows[3].setText(f"{mem.used/1024**3:.1f}/{mem.total/1024**3:.0f}G")
-                self.rows[3].setStyleSheet(f"color: {mem_color(vram_pct)};")
+                self.rows[3].setText(f"{vram_pct:.0f}%")
+                self._set_meter(3, vram_pct)
             except Exception:
                 self.rows[2].setText("—")
                 self.rows[3].setText("—")
+                self._set_meter(2, 0)
+                self._set_meter(3, 0)
         else:
             self.rows[2].setText("N/A")
             self.rows[3].setText("N/A")
+            self._set_meter(2, 0)
+            self._set_meter(3, 0)
 
         self.rows[4].setText(fmt_bytes(recv_speed))
-        self.rows[4].setStyleSheet("color: #4ca8ff;")
+        self._set_meter(4, min(100, max(2 if recv_speed else 0, round(recv_speed / (25 * 1024**2) * 100))))
 
         self.rows[5].setText(fmt_bytes(sent_speed))
-        self.rows[5].setStyleSheet("color: #ff9944;")
+        self._set_meter(5, min(100, max(2 if sent_speed else 0, round(sent_speed / (384 * 1024) * 100))))
 
         uptime = max(0, int(time.time() - psutil.boot_time()))
-        hours, remainder = divmod(uptime, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        self.rows[6].setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
-        self.rows[6].setStyleSheet("color: #ffffff;")
+        days, remainder = divmod(uptime, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes = remainder // 60
+        self.rows[6].setText(f"{days}д {hours:02d}ч {minutes:02d}м")
+
+    @staticmethod
+    def _load_color(value):
+        if value <= 60:
+            return "#4cff91"
+        if value <= 85:
+            return "#ffd166"
+        return "#ff5c6c"
+
+    def _set_meter(self, index, value):
+        value = min(100, max(0, round(value)))
+        color = self._load_color(value)
+        self.meters[index].setValue(value)
+        self.meters[index].setStyleSheet(
+            "QProgressBar { background-color: #0b2943; border: 1px solid #123d5d; border-radius: 4px; }"
+            f"QProgressBar::chunk {{ background-color: {color}; border: none; border-radius: 4px; }}"
+        )
+        if index < 4:
+            self.rows[index].setStyleSheet(f"color: {color};")
+            glow = self.rows[index].graphicsEffect()
+            if glow:
+                glow.setColor(QColor(color))
+        glow = self.meters[index].graphicsEffect()
+        if glow:
+            glow.setColor(QColor(color))
 
 
 if __name__ == "__main__":

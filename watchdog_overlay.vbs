@@ -5,7 +5,8 @@ Dim wmi, processes, process, shell
 Set fso = CreateObject("Scripting.FileSystemObject")
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 overlayPath = fso.BuildPath(scriptDir, "overlay.py")
-pythonPath = "C:\Users\USSR\AppData\Local\Programs\Python\Python312\pythonw.exe"
+pythonPath = fso.BuildPath(scriptDir, ".venv\Scripts\pythonw.exe")
+If Not fso.FileExists(pythonPath) Then WScript.Quit 1
 
 Set wmi = GetObject("winmgmts:\\.\root\cimv2")
 Set processes = wmi.ExecQuery("SELECT CommandLine FROM Win32_Process WHERE Name = 'pythonw.exe'")
