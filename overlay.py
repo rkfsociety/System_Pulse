@@ -219,8 +219,8 @@ class Overlay(QWidget):
         tray_menu = QMenu()
         visibility_action = QAction("Показывать оверлей", self)
         visibility_action.setCheckable(True)
-        visibility_action.setChecked(True)
-        visibility_action.toggled.connect(self.setVisible)
+        visibility_action.setChecked(self._settings.get("visible", True))
+        visibility_action.toggled.connect(self.set_overlay_visible)
         tray_menu.addAction(visibility_action)
 
         self.move_action = QAction("Переместить оверлей", self)
@@ -238,6 +238,15 @@ class Overlay(QWidget):
         tray_menu.addAction(quit_action)
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.show()
+
+    def set_overlay_visible(self, visible):
+        self.setVisible(visible)
+        self._settings["visible"] = visible
+        try:
+            with SETTINGS_PATH.open("w", encoding="utf-8") as file:
+                json.dump(self._settings, file, ensure_ascii=False, indent=2)
+        except OSError:
+            logging.exception("Не удалось сохранить состояние оверлея")
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -598,5 +607,6 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     w = Overlay()
-    w.show()
+    if w._settings.get("visible", True):
+        w.show()
     sys.exit(app.exec())
